@@ -1,0 +1,47 @@
+[project]
+name = "real-estate-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Oshadha", email = "oshadha@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+]
+
+[project.scripts]
+real-estate-ai = "real_estate_ai.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.12,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.12.0",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.7",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+
+[tool.fastapi]
+entrypoint = "real_estate_ai.api:app"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    'ignore:The anyio\.abc\.BlockingPortal alias is deprecated.*:DeprecationWarning',
+]

@@ -17,7 +17,7 @@ class RecommendationExplanation(BaseModel):
 
     summary: str = Field(min_length=1, max_length=300)
     strengths: list[ExplanationPoint] = Field(
-        min_length=1,
+        default_factory=list,
         max_length=3,
     )
     considerations: list[ExplanationPoint] = Field(

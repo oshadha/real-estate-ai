@@ -46,5 +46,4 @@ def test_invalid_llm_json_is_rejected() -> None:
     error_types = {error["type"] for error in exception.value.errors()}
 
     assert "string_too_short" in error_types
-    assert "too_short" in error_types
     assert "extra_forbidden" in error_types

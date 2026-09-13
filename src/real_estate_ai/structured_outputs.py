@@ -16,11 +16,15 @@ class RecommendationExplanation(BaseModel):
     )
 
     summary: str = Field(min_length=1, max_length=300)
-    strengths: list[ExplanationPoint] = Field(
-        default_factory=list,
-        max_length=3,
+    strengths: list[ExplanationPoint] = Field(max_length=3)
+    considerations: list[ExplanationPoint] = Field(max_length=3)
+
+
+class GeneratedRecommendationSummary(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        strict=True,
     )
-    considerations: list[ExplanationPoint] = Field(
-        default_factory=list,
-        max_length=3,
-    )
+
+    summary: str = Field(min_length=1, max_length=300)

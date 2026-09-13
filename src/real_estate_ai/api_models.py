@@ -48,17 +48,23 @@ class RecommendationRequest(ApiModel):
     limit: int = Field(default=3, ge=1, le=10)
 
 
-class PropertyRecommendationResponse(ApiModel):
-    reference: str
-    location: str
-    price_aed: int
-    score: float
-    explanation: str
-
-
 class PropertyListingResponse(ApiModel):
     reference: str
     location: str
     price_aed: int
     bedrooms: int
     area_sqft: int
+
+
+class RecommendationExplanationResponse(ApiModel):
+    summary: str = Field(min_length=1, max_length=300)
+    strengths: list[str] = Field(max_length=3)
+    considerations: list[str] = Field(max_length=3)
+
+
+class PropertyRecommendationResponse(ApiModel):
+    reference: str
+    location: str
+    price_aed: int
+    score: float
+    explanation: RecommendationExplanationResponse

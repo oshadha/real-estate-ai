@@ -3,6 +3,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from real_estate_ai.evidence import build_recommendation_evidence
 from real_estate_ai.language_models import LanguageModelError
 from real_estate_ai.models import (
     BuyerPreferences,
@@ -18,7 +19,7 @@ class RecommendationExplainer(Protocol):
         self,
         match: PropertyMatch,
         preferences: BuyerPreferences,
-    ) -> str: ...
+    ) -> RecommendationExplanation: ...
 
 
 class RecommendationExplanationGenerator(Protocol):
@@ -34,8 +35,12 @@ class TemplateRecommendationExplainer:
         self,
         match: PropertyMatch,
         preferences: BuyerPreferences,
-    ) -> str:
+    ) -> RecommendationExplanation:
         listing = match.listing
+        evidence = build_recommendation_evidence(
+            match,
+            preferences,
+        )
 
         if listing.location.casefold() == preferences.preferred_location.casefold():
             location_text = "matches the preferred location"
@@ -48,9 +53,15 @@ class TemplateRecommendationExplainer:
             amount_over_budget = listing.price_aed - preferences.max_price_aed
             budget_text = f"is AED {amount_over_budget:,.0f} over budget"
 
-        return (
+        summary = (
             f"{listing.reference} scored {match.score:.2f}/100. "
             f"It {location_text} and {budget_text}."
+        )
+
+        return RecommendationExplanation(
+            summary=summary,
+            strengths=list(evidence.strengths),
+            considerations=list(evidence.considerations),
         )
 
 
@@ -69,28 +80,56 @@ class ResilientRecommendationExplainer:
         self._max_attempts = max_attempts
 
     async def explain(
-        self,
-        match: PropertyMatch,
-        preferences: BuyerPreferences,
-    ) -> str:
+    self,
+    match: PropertyMatch,
+    preferences: BuyerPreferences,
+) -> RecommendationExplanation:
         for attempt in range(1, self._max_attempts + 1):
             try:
                 explanation = await self._generator.generate(
                     match,
                     preferences,
                 )
-                return explanation.summary
-            except (LanguageModelError, ValidationError) as error:
-                logger.warning(
-                    "Explanation attempt %d failed for property %s: %s",
-                    attempt,
-                    match.listing.reference,
-                    type(error).__name__,
+
+                logger.info(
+                    "Recommendation explanation generated",
+                    extra={
+                        "event_name": (
+                            "recommendation.explanation.generated"
+                        ),
+                        "property_reference": match.listing.reference,
+                        "generation_source": "language_model",
+                        "attempt_count": attempt,
+                    },
                 )
 
-        logger.error(
-            "Using template explanation for property %s",
-            match.listing.reference,
+                return explanation
+            except (LanguageModelError, ValidationError) as error:
+                logger.warning(
+                    "Recommendation explanation attempt failed",
+                    extra={
+                        "event_name": (
+                            "recommendation.explanation.attempt_failed"
+                        ),
+                        "property_reference": match.listing.reference,
+                        "attempt_number": attempt,
+                        "error_type": type(error).__name__,
+                    },
+                )
+
+        fallback_explanation = await self._fallback.explain(
+            match,
+            preferences,
         )
 
-        return await self._fallback.explain(match, preferences)
+        logger.error(
+            "Using template recommendation explanation",
+            extra={
+                "event_name": "recommendation.explanation.fallback",
+                "property_reference": match.listing.reference,
+                "generation_source": "template",
+                "attempt_count": self._max_attempts,
+            },
+        )
+
+        return fallback_explanation

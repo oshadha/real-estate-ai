@@ -1,4 +1,5 @@
 import asyncio
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
@@ -6,18 +7,23 @@ from fastapi import Depends, FastAPI
 from real_estate_ai.api_models import (
     PropertyListingResponse,
     PropertyRecommendationResponse,
+    RecommendationExplanationResponse,
     RecommendationRequest,
 )
 from real_estate_ai.explanations import (
     RecommendationExplainer,
+    ResilientRecommendationExplainer,
     TemplateRecommendationExplainer,
 )
+from real_estate_ai.language_models import StructuredRecommendationGenerator
 from real_estate_ai.models import PropertyListing
+from real_estate_ai.openai_language_models import OpenAILanguageModelClient
 from real_estate_ai.recommendations import rank_properties
 from real_estate_ai.repositories import (
     InMemoryPropertyRepository,
     PropertyRepository,
 )
+from real_estate_ai.settings import Settings
 
 app = FastAPI(
     title="Real Estate AI API",
@@ -43,11 +49,25 @@ property_repository: PropertyRepository = InMemoryPropertyRepository(
     ]
 )
 
-recommendation_explainer: RecommendationExplainer = TemplateRecommendationExplainer()
 
-
+@lru_cache
 def get_recommendation_explainer() -> RecommendationExplainer:
-    return recommendation_explainer
+    settings = Settings()
+
+    language_model_client = OpenAILanguageModelClient(
+        api_key=settings.openai_api_key.get_secret_value(),
+        model=settings.openai_model,
+    )
+
+    generator = StructuredRecommendationGenerator(
+        client=language_model_client,
+    )
+
+    return ResilientRecommendationExplainer(
+        generator=generator,
+        fallback=TemplateRecommendationExplainer(),
+        max_attempts=2,
+    )
 
 
 RecommendationExplainerDependency = Annotated[
@@ -96,7 +116,11 @@ async def create_recommendations(
             location=match.listing.location,
             price_aed=match.listing.price_aed,
             score=match.score,
-            explanation=explanation,
+            explanation=RecommendationExplanationResponse(
+                summary=explanation.summary,
+                strengths=explanation.strengths,
+                considerations=explanation.considerations,
+            ),
         )
         for match, explanation in zip(
             matches,

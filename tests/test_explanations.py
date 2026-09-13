@@ -36,7 +36,15 @@ async def test_explanation_describes_location_and_budget() -> None:
 
     explanation = await explainer.explain(match, preferences)
 
-    assert explanation == (
+    assert explanation.summary == (
         "DXB-1001 scored 91.45/100. "
         "It matches the preferred location and is AED 50,000 over budget."
     )
+    assert explanation.strengths == [
+        "Matches the preferred location",
+        "Meets the minimum bedroom requirement",
+    ]
+    assert explanation.considerations == [
+        "AED 50,000 over budget",
+        "80 sqft below the minimum area",
+    ]

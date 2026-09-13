@@ -1,5 +1,7 @@
+from collections.abc import Iterator
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from real_estate_ai.api import (
@@ -7,7 +9,10 @@ from real_estate_ai.api import (
     get_property_repository,
     get_recommendation_explainer,
 )
-from real_estate_ai.explanations import RecommendationExplainer
+from real_estate_ai.explanations import (
+    RecommendationExplainer,
+    TemplateRecommendationExplainer,
+)
 from real_estate_ai.models import (
     BuyerPreferences,
     PropertyListing,
@@ -17,8 +22,26 @@ from real_estate_ai.repositories import (
     InMemoryPropertyRepository,
     PropertyRepository,
 )
+from real_estate_ai.structured_outputs import RecommendationExplanation
 
 client = TestClient(app)
+
+
+def override_recommendation_explainer() -> RecommendationExplainer:
+    return TemplateRecommendationExplainer()
+
+
+@pytest.fixture(autouse=True)
+def use_template_recommendation_explainer() -> Iterator[None]:
+    app.dependency_overrides[get_recommendation_explainer] = override_recommendation_explainer
+
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(
+            get_recommendation_explainer,
+            None,
+        )
 
 
 class StubRecommendationExplainer:
@@ -26,8 +49,12 @@ class StubRecommendationExplainer:
         self,
         match: PropertyMatch,
         preferences: BuyerPreferences,
-    ) -> str:
-        return f"Test explanation for {match.listing.reference}"
+    ) -> RecommendationExplanation:
+        return RecommendationExplanation(
+            summary=f"Test explanation for {match.listing.reference}",
+            strengths=["Test strength"],
+            considerations=[],
+        )
 
 
 def _valid_request() -> dict[str, Any]:
@@ -103,7 +130,11 @@ def test_recommendations_are_returned_in_ranked_order() -> None:
     ]
     assert body[0]["score"] == 91.45
     assert body[1]["score"] == 90.0
-    assert body[0]["explanation"] == "Test explanation for DXB-1001"
+    assert body[0]["explanation"] == {
+        "summary": "Test explanation for DXB-1001",
+        "strengths": ["Test strength"],
+        "considerations": [],
+    }
 
 
 def test_invalid_budget_returns_validation_error() -> None:

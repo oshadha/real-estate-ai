@@ -1,8 +1,19 @@
-from typing import Protocol
+from typing import Protocol, TypeVar
 
+from pydantic import BaseModel
+
+from real_estate_ai.evidence import build_recommendation_evidence
 from real_estate_ai.models import BuyerPreferences, PropertyMatch
 from real_estate_ai.prompts import build_recommendation_prompt
-from real_estate_ai.structured_outputs import RecommendationExplanation
+from real_estate_ai.structured_outputs import (
+    GeneratedRecommendationSummary,
+    RecommendationExplanation,
+)
+
+ResponseModelT = TypeVar(
+    "ResponseModelT",
+    bound=BaseModel,
+)
 
 
 class LanguageModelError(RuntimeError):
@@ -15,7 +26,8 @@ class LanguageModelClient(Protocol):
         *,
         system_message: str,
         user_message: str,
-    ) -> str: ...
+        response_model: type[ResponseModelT],
+    ) -> ResponseModelT: ...
 
 
 class StructuredRecommendationGenerator:
@@ -27,11 +39,24 @@ class StructuredRecommendationGenerator:
         match: PropertyMatch,
         preferences: BuyerPreferences,
     ) -> RecommendationExplanation:
-        prompt = build_recommendation_prompt(match, preferences)
-
-        raw_output = await self._client.complete(
-            system_message=prompt.system_message,
-            user_message=prompt.user_message,
+        evidence = build_recommendation_evidence(
+            match,
+            preferences,
+        )
+        prompt = build_recommendation_prompt(
+            match,
+            preferences,
+            evidence,
         )
 
-        return RecommendationExplanation.model_validate_json(raw_output)
+        generated_summary = await self._client.complete(
+            system_message=prompt.system_message,
+            user_message=prompt.user_message,
+            response_model=GeneratedRecommendationSummary,
+        )
+
+        return RecommendationExplanation(
+            summary=generated_summary.summary,
+            strengths=list(evidence.strengths),
+            considerations=list(evidence.considerations),
+        )

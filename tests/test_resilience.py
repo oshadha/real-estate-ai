@@ -1,10 +1,15 @@
+import logging
+
 import pytest
 
 from real_estate_ai.explanations import (
     ResilientRecommendationExplainer,
     TemplateRecommendationExplainer,
 )
-from real_estate_ai.language_models import StructuredRecommendationGenerator
+from real_estate_ai.language_models import (
+    ResponseModelT,
+    StructuredRecommendationGenerator,
+)
 from real_estate_ai.models import (
     BuyerPreferences,
     PropertyListing,
@@ -19,7 +24,7 @@ def anyio_backend() -> str:
 
 class SequenceLanguageModelClient:
     def __init__(self, responses: list[str]) -> None:
-        self._responses = responses
+        self._responses = iter(responses)
         self.call_count = 0
 
     async def complete(
@@ -27,10 +32,12 @@ class SequenceLanguageModelClient:
         *,
         system_message: str,
         user_message: str,
-    ) -> str:
-        response = self._responses[self.call_count]
+        response_model: type[ResponseModelT],
+    ) -> ResponseModelT:
         self.call_count += 1
-        return response
+        response = next(self._responses)
+
+        return response_model.model_validate_json(response)
 
 
 def _match_and_preferences() -> tuple[
@@ -51,19 +58,22 @@ def _match_and_preferences() -> tuple[
         minimum_area_sqft=1_000,
     )
 
-    return PropertyMatch(listing=listing, score=91.45), preferences
+    return PropertyMatch(
+        listing=listing,
+        score=91.45,
+    ), preferences
 
 
 @pytest.mark.anyio
-async def test_invalid_output_is_retried() -> None:
+async def test_invalid_output_is_retried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     client = SequenceLanguageModelClient(
         [
-            '{"summary": "", "strengths": [], "considerations": []}',
+            '{"summary": ""}',
             """
             {
-                "summary": "A valid explanation after retry.",
-                "strengths": ["Preferred location"],
-                "considerations": ["Above budget"]
+                "summary": "A valid explanation after retry."
             }
             """,
         ]
@@ -75,16 +85,50 @@ async def test_invalid_output_is_retried() -> None:
     )
     match, preferences = _match_and_preferences()
 
-    explanation = await explainer.explain(match, preferences)
+    with caplog.at_level(
+        logging.INFO,
+        logger="real_estate_ai.explanations",
+    ):
+        explanation = await explainer.explain(
+            match,
+            preferences,
+        )
 
-    assert explanation == "A valid explanation after retry."
+    assert explanation.summary == "A valid explanation after retry."
     assert client.call_count == 2
+
+    failed_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "recommendation.explanation.attempt_failed"
+    ]
+
+    assert len(failed_records) == 1
+    assert failed_records[0].attempt_number == 1
+    assert failed_records[0].error_type == "ValidationError"
+
+    generated_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "recommendation.explanation.generated"
+    )
+
+    assert generated_record.generation_source == "language_model"
+    assert generated_record.attempt_count == 2
+    assert generated_record.property_reference == "DXB-1001"
 
 
 @pytest.mark.anyio
-async def test_template_is_used_after_all_attempts_fail() -> None:
-    invalid_output = '{"summary": "", "strengths": [], "considerations": []}'
-    client = SequenceLanguageModelClient([invalid_output, invalid_output])
+async def test_template_is_used_after_all_attempts_fail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    invalid_output = '{"summary": ""}'
+    client = SequenceLanguageModelClient(
+        [
+            invalid_output,
+            invalid_output,
+        ]
+    )
     generator = StructuredRecommendationGenerator(client)
     explainer = ResilientRecommendationExplainer(
         generator,
@@ -92,10 +136,36 @@ async def test_template_is_used_after_all_attempts_fail() -> None:
     )
     match, preferences = _match_and_preferences()
 
-    explanation = await explainer.explain(match, preferences)
+    with caplog.at_level(
+        logging.INFO,
+        logger="real_estate_ai.explanations",
+    ):
+        explanation = await explainer.explain(
+            match,
+            preferences,
+        )
 
-    assert explanation == (
+    assert explanation.summary == (
         "DXB-1001 scored 91.45/100. "
         "It matches the preferred location and is AED 50,000 over budget."
     )
     assert client.call_count == 2
+
+    failed_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "recommendation.explanation.attempt_failed"
+    ]
+
+    assert len(failed_records) == 2
+    assert [record.attempt_number for record in failed_records] == [1, 2]
+
+    fallback_record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "recommendation.explanation.fallback"
+    )
+
+    assert fallback_record.generation_source == "template"
+    assert fallback_record.attempt_count == 2
+    assert fallback_record.property_reference == "DXB-1001"

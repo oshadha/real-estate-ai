@@ -1,11 +1,17 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from real_estate_ai.language_models import StructuredRecommendationGenerator
+from real_estate_ai.language_models import (
+    ResponseModelT,
+    StructuredRecommendationGenerator,
+)
 from real_estate_ai.models import (
     BuyerPreferences,
     PropertyListing,
     PropertyMatch,
+)
+from real_estate_ai.structured_outputs import (
+    GeneratedRecommendationSummary,
 )
 
 
@@ -19,16 +25,20 @@ class StubLanguageModelClient:
         self._response = response
         self.system_message: str | None = None
         self.user_message: str | None = None
+        self.response_model: type[BaseModel] | None = None
 
     async def complete(
         self,
         *,
         system_message: str,
         user_message: str,
-    ) -> str:
+        response_model: type[ResponseModelT],
+    ) -> ResponseModelT:
         self.system_message = system_message
         self.user_message = user_message
-        return self._response
+        self.response_model = response_model
+
+        return response_model.model_validate_json(self._response)
 
 
 def _match_and_preferences() -> tuple[
@@ -60,9 +70,7 @@ async def test_generator_validates_model_output() -> None:
     client = StubLanguageModelClient(
         """
         {
-            "summary": "A strong match slightly above budget.",
-            "strengths": ["Matches the preferred location"],
-            "considerations": ["AED 50,000 above budget"]
+            "summary": "A strong match slightly above budget."
         }
         """
     )
@@ -72,13 +80,26 @@ async def test_generator_validates_model_output() -> None:
     explanation = await generator.generate(match, preferences)
 
     assert explanation.summary == "A strong match slightly above budget."
-    assert explanation.strengths == ["Matches the preferred location"]
-    assert explanation.considerations == ["AED 50,000 above budget"]
+    assert explanation.strengths == [
+        "Matches the preferred location",
+        "Meets the minimum bedroom requirement",
+    ]
+    assert explanation.considerations == [
+        "AED 50,000 over budget",
+        "80 sqft below the minimum area",
+    ]
 
-    assert client.system_message is not None
-    assert "Do not invent" in client.system_message
-    assert client.user_message is not None
-    assert '"reference": "DXB-1001"' in client.user_message
+    system_message = client.system_message
+    user_message = client.user_message
+
+    assert system_message is not None
+    assert "Do not invent" in system_message
+
+    assert user_message is not None
+    assert '"reference": "DXB-1001"' in user_message
+    assert '"verified_evidence"' in user_message
+
+    assert client.response_model is GeneratedRecommendationSummary
 
 
 @pytest.mark.anyio
@@ -86,9 +107,7 @@ async def test_generator_rejects_invalid_model_output() -> None:
     client = StubLanguageModelClient(
         """
         {
-            "summary": "",
-            "strengths": [],
-            "considerations": []
+            "summary": ""
         }
         """
     )

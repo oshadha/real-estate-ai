@@ -104,8 +104,8 @@ async def test_invalid_output_is_retried(
     ]
 
     assert len(failed_records) == 1
-    assert failed_records[0].attempt_number == 1
-    assert failed_records[0].error_type == "ValidationError"
+    failed_records[0].__dict__["attempt_number"] == 1
+    failed_records[0].__dict__["error_type"] == "ValidationError"
 
     generated_record = next(
         record
@@ -113,9 +113,9 @@ async def test_invalid_output_is_retried(
         if getattr(record, "event_name", None) == "recommendation.explanation.generated"
     )
 
-    assert generated_record.generation_source == "language_model"
-    assert generated_record.attempt_count == 2
-    assert generated_record.property_reference == "DXB-1001"
+    assert generated_record.__dict__["generation_source"] == "language_model"
+    assert generated_record.__dict__["attempt_count"] == 2
+    assert generated_record.__dict__["property_reference"] == "DXB-1001"
 
 
 @pytest.mark.anyio
@@ -158,7 +158,7 @@ async def test_template_is_used_after_all_attempts_fail(
     ]
 
     assert len(failed_records) == 2
-    assert [record.attempt_number for record in failed_records] == [1, 2]
+    assert [record.__dict__["attempt_number"] for record in failed_records] == [1, 2]
 
     fallback_record = next(
         record
@@ -166,6 +166,8 @@ async def test_template_is_used_after_all_attempts_fail(
         if getattr(record, "event_name", None) == "recommendation.explanation.fallback"
     )
 
-    assert fallback_record.generation_source == "template"
-    assert fallback_record.attempt_count == 2
-    assert fallback_record.property_reference == "DXB-1001"
+    fallback_fields = vars(fallback_record)
+
+    assert fallback_fields["generation_source"] == "template"
+    assert fallback_fields["attempt_count"] == 2
+    assert fallback_fields["property_reference"] == "DXB-1001"

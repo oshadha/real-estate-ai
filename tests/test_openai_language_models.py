@@ -145,12 +145,14 @@ async def test_openai_client_logs_safe_usage_metadata(
         if getattr(record, "event_name", None) == "openai.request.completed"
     )
 
-    assert record.model == "gpt-5.6-luna"
-    assert record.response_id == "resp-test-123"
-    assert record.duration_ms == 125.0
-    assert record.input_tokens == 120
-    assert record.output_tokens == 30
-    assert record.total_tokens == 150
+    fields = vars(record)
+
+    assert fields["model"] == "gpt-5.6-luna"
+    assert fields["response_id"] == "resp-test-123"
+    assert fields["duration_ms"] == 125.0
+    assert fields["input_tokens"] == 120
+    assert fields["output_tokens"] == 30
+    assert fields["total_tokens"] == 150
 
     assert "Private system instructions" not in caplog.text
     assert "Private buyer details" not in caplog.text

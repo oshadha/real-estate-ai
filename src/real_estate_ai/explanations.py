@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Protocol
 
@@ -9,6 +10,7 @@ from real_estate_ai.models import (
     BuyerPreferences,
     PropertyMatch,
 )
+from real_estate_ai.request_context import get_request_id
 from real_estate_ai.structured_outputs import RecommendationExplanation
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,30 @@ class RecommendationExplainer(Protocol):
         match: PropertyMatch,
         preferences: BuyerPreferences,
     ) -> RecommendationExplanation: ...
+
+
+class ConcurrencyLimitedRecommendationExplainer:
+    def __init__(
+        self,
+        inner: RecommendationExplainer,
+        max_concurrency: int,
+    ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
+
+        self._inner = inner
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def explain(
+        self,
+        match: PropertyMatch,
+        preferences: BuyerPreferences,
+    ) -> RecommendationExplanation:
+        async with self._semaphore:
+            return await self._inner.explain(
+                match,
+                preferences,
+            )
 
 
 class RecommendationExplanationGenerator(Protocol):
@@ -80,10 +106,10 @@ class ResilientRecommendationExplainer:
         self._max_attempts = max_attempts
 
     async def explain(
-    self,
-    match: PropertyMatch,
-    preferences: BuyerPreferences,
-) -> RecommendationExplanation:
+        self,
+        match: PropertyMatch,
+        preferences: BuyerPreferences,
+    ) -> RecommendationExplanation:
         for attempt in range(1, self._max_attempts + 1):
             try:
                 explanation = await self._generator.generate(
@@ -94,9 +120,8 @@ class ResilientRecommendationExplainer:
                 logger.info(
                     "Recommendation explanation generated",
                     extra={
-                        "event_name": (
-                            "recommendation.explanation.generated"
-                        ),
+                        "event_name": ("recommendation.explanation.generated"),
+                        "correlation_id": get_request_id(),
                         "property_reference": match.listing.reference,
                         "generation_source": "language_model",
                         "attempt_count": attempt,
@@ -108,9 +133,8 @@ class ResilientRecommendationExplainer:
                 logger.warning(
                     "Recommendation explanation attempt failed",
                     extra={
-                        "event_name": (
-                            "recommendation.explanation.attempt_failed"
-                        ),
+                        "event_name": ("recommendation.explanation.attempt_failed"),
+                        "correlation_id": get_request_id(),
                         "property_reference": match.listing.reference,
                         "attempt_number": attempt,
                         "error_type": type(error).__name__,
@@ -126,6 +150,7 @@ class ResilientRecommendationExplainer:
             "Using template recommendation explanation",
             extra={
                 "event_name": "recommendation.explanation.fallback",
+                "correlation_id": get_request_id(),
                 "property_reference": match.listing.reference,
                 "generation_source": "template",
                 "attempt_count": self._max_attempts,

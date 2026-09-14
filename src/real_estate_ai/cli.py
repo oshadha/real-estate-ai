@@ -1,31 +1,18 @@
-from real_estate_ai.models import BuyerPreferences, PropertyListing
-from real_estate_ai.recommendations import rank_properties
+from real_estate_ai.models import (
+    BuyerPreferences,
+    PropertyListing,
+)
+from real_estate_ai.scoring import calculate_match_score
 
 
 def main() -> None:
-    listings = [
-        PropertyListing(
-            reference="DXB-1001",
-            location="Dubai Marina",
-            price_aed=1_150_000,
-            bedrooms=2,
-            area_sqft=920,
-        ),
-        PropertyListing(
-            reference="DXB-1002",
-            location="JVC",
-            price_aed=950_000,
-            bedrooms=2,
-            area_sqft=1_100,
-        ),
-        PropertyListing(
-            reference="DXB-1003",
-            location="Dubai Marina",
-            price_aed=1_050_000,
-            bedrooms=1,
-            area_sqft=850,
-        ),
-    ]
+    listing = PropertyListing(
+        reference="DXB-1001",
+        location="Dubai Marina",
+        price_aed=1_150_000,
+        bedrooms=2,
+        area_sqft=920,
+    )
 
     preferences = BuyerPreferences(
         preferred_location="Dubai Marina",
@@ -34,7 +21,10 @@ def main() -> None:
         minimum_area_sqft=1_000,
     )
 
-    matches = rank_properties(listings, preferences)
+    score = calculate_match_score(
+        listing,
+        preferences,
+    )
 
-    for position, match in enumerate(matches, start=1):
-        print(f"{position}. {match.listing.reference}: {match.score:.2f}/100")
+    print(f"Property: {listing.reference}")
+    print(f"Match score: {score:.2f}/100")

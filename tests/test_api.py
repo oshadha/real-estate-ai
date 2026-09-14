@@ -22,6 +22,7 @@ from real_estate_ai.repositories import (
     InMemoryPropertyRepository,
     PropertyRepository,
 )
+from real_estate_ai.request_context import get_request_id
 from real_estate_ai.structured_outputs import RecommendationExplanation
 
 client = TestClient(app)
@@ -45,11 +46,16 @@ def use_template_recommendation_explainer() -> Iterator[None]:
 
 
 class StubRecommendationExplainer:
+    def __init__(self) -> None:
+        self.request_ids: list[str | None] = []
+
     async def explain(
         self,
         match: PropertyMatch,
         preferences: BuyerPreferences,
     ) -> RecommendationExplanation:
+        self.request_ids.append(get_request_id())
+
         return RecommendationExplanation(
             summary=f"Test explanation for {match.listing.reference}",
             strengths=["Test strength"],
@@ -115,12 +121,20 @@ def test_recommendations_are_returned_in_ranked_order() -> None:
         response = client.post(
             "/recommendations",
             json=_valid_request(),
+            headers={
+                "X-Request-ID": "test-request-123",
+            },
         )
     finally:
         app.dependency_overrides.pop(get_property_repository, None)
         app.dependency_overrides.pop(get_recommendation_explainer, None)
 
     assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == "test-request-123"
+    assert explainer.request_ids == [
+        "test-request-123",
+        "test-request-123",
+    ]
 
     body = response.json()
 

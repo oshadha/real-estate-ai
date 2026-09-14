@@ -104,8 +104,8 @@ async def test_invalid_output_is_retried(
     ]
 
     assert len(failed_records) == 1
-    failed_records[0].__dict__["attempt_number"] == 1
-    failed_records[0].__dict__["error_type"] == "ValidationError"
+    assert failed_records[0].__dict__["attempt_number"] == 1
+    assert failed_records[0].__dict__["error_type"] == "ValidationError"
 
     generated_record = next(
         record

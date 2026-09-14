@@ -12,3 +12,8 @@ class Settings(BaseSettings):
 
     openai_api_key: SecretStr = Field(min_length=1)
     openai_model: str = Field(min_length=1)
+    openai_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+    )

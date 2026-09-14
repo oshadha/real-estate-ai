@@ -1,8 +1,9 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 
 from real_estate_ai.api_models import (
     PropertyListingResponse,
@@ -11,6 +12,7 @@ from real_estate_ai.api_models import (
     RecommendationRequest,
 )
 from real_estate_ai.explanations import (
+    ConcurrencyLimitedRecommendationExplainer,
     RecommendationExplainer,
     ResilientRecommendationExplainer,
     TemplateRecommendationExplainer,
@@ -23,12 +25,32 @@ from real_estate_ai.repositories import (
     InMemoryPropertyRepository,
     PropertyRepository,
 )
+from real_estate_ai.request_context import (
+    bind_request_id,
+    resolve_request_id,
+)
 from real_estate_ai.settings import Settings
 
 app = FastAPI(
     title="Real Estate AI API",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def add_request_id(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    request_id = resolve_request_id(request.headers.get("X-Request-ID"))
+
+    with bind_request_id(request_id):
+        response = await call_next(request)
+
+    response.headers["X-Request-ID"] = request_id
+
+    return response
+
 
 property_repository: PropertyRepository = InMemoryPropertyRepository(
     [
@@ -63,10 +85,14 @@ def get_recommendation_explainer() -> RecommendationExplainer:
         client=language_model_client,
     )
 
-    return ResilientRecommendationExplainer(
-        generator=generator,
-        fallback=TemplateRecommendationExplainer(),
-        max_attempts=2,
+    resilient_explainer = ResilientRecommendationExplainer(
+        generator,
+        TemplateRecommendationExplainer(),
+    )
+
+    return ConcurrencyLimitedRecommendationExplainer(
+        resilient_explainer,
+        max_concurrency=settings.openai_max_concurrency,
     )
 
 

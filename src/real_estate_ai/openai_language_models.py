@@ -7,6 +7,7 @@ from real_estate_ai.language_models import (
     LanguageModelError,
     ResponseModelT,
 )
+from real_estate_ai.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,11 @@ class OpenAILanguageModelClient:
                 "OpenAI request failed",
                 extra={
                     "event_name": "openai.request.failed",
+                    "response_id": getattr(error, "request_id", None),
                     "model": self._model,
                     "duration_ms": duration_ms,
                     "error_type": type(error).__name__,
-                    "response_id": getattr(error, "request_id", None),
+                    "correlation_id": get_request_id(),
                 },
             )
 
@@ -70,6 +72,7 @@ class OpenAILanguageModelClient:
             "OpenAI request completed",
             extra={
                 "event_name": "openai.request.completed",
+                "correlation_id": get_request_id(),
                 "model": self._model,
                 "response_id": response.id,
                 "duration_ms": duration_ms,

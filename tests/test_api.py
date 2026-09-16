@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +27,11 @@ from real_estate_ai.request_context import get_request_id
 from real_estate_ai.structured_outputs import RecommendationExplanation
 
 client = TestClient(app)
+
+
+class FailingPropertyRepository:
+    async def get_all(self) -> list[PropertyListing]:
+        raise RuntimeError("Repository unavailable")
 
 
 def override_recommendation_explainer() -> RecommendationExplainer:
@@ -100,6 +106,50 @@ def test_health_endpoint_returns_healthy() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+def test_readiness_endpoint_returns_ready() -> None:
+    with patch("real_estate_ai.api.get_settings"):
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_readiness_returns_503_when_configuration_is_unavailable() -> None:
+    with patch(
+        "real_estate_ai.api.get_settings",
+        side_effect=ValueError("Configuration unavailable"),
+    ):
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Service is not ready",
+    }
+
+
+def test_readiness_returns_503_when_repository_is_unavailable() -> None:
+    repository = FailingPropertyRepository()
+
+    def override_property_repository() -> PropertyRepository:
+        return repository
+
+    app.dependency_overrides[get_property_repository] = override_property_repository
+
+    try:
+        with patch("real_estate_ai.api.get_settings"):
+            response = client.get("/ready")
+    finally:
+        app.dependency_overrides.pop(
+            get_property_repository,
+            None,
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Service is not ready",
+    }
 
 
 def test_recommendations_are_returned_in_ranked_order() -> None:

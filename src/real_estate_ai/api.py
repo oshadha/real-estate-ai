@@ -1,15 +1,25 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+)
 
 from real_estate_ai.api_models import (
     PropertyListingResponse,
     PropertyRecommendationResponse,
     RecommendationExplanationResponse,
     RecommendationRequest,
+)
+from real_estate_ai.explanation_caching import (
+    CachingRecommendationExplanationGenerator,
 )
 from real_estate_ai.explanations import (
     ConcurrencyLimitedRecommendationExplainer,
@@ -30,6 +40,8 @@ from real_estate_ai.request_context import (
     resolve_request_id,
 )
 from real_estate_ai.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Real Estate AI API",
@@ -73,20 +85,31 @@ property_repository: PropertyRepository = InMemoryPropertyRepository(
 
 
 @lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+@lru_cache
 def get_recommendation_explainer() -> RecommendationExplainer:
-    settings = Settings()
+    settings = get_settings()
 
     language_model_client = OpenAILanguageModelClient(
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.openai_model,
     )
 
-    generator = StructuredRecommendationGenerator(
+    structured_generator = StructuredRecommendationGenerator(
         client=language_model_client,
     )
 
+    cached_generator = CachingRecommendationExplanationGenerator(
+        structured_generator,
+        ttl_seconds=settings.explanation_cache_ttl_seconds,
+        max_entries=settings.explanation_cache_max_entries,
+    )
+
     resilient_explainer = ResilientRecommendationExplainer(
-        generator,
+        cached_generator,
         TemplateRecommendationExplainer(),
     )
 
@@ -115,6 +138,30 @@ PropertyRepositoryDependency = Annotated[
 @app.get("/health", tags=["Operations"])
 async def get_health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/ready", tags=["Operations"])
+async def get_readiness(
+    repository: PropertyRepositoryDependency,
+) -> dict[str, str]:
+    try:
+        get_settings()
+        await repository.get_all()
+    except Exception as error:
+        logger.warning(
+            "Application readiness check failed",
+            extra={
+                "event_name": "application.readiness.failed",
+                "error_type": type(error).__name__,
+            },
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Service is not ready",
+        ) from error
+
+    return {"status": "ready"}
 
 
 @app.post(

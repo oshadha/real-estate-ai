@@ -1,7 +1,7 @@
 [project]
 name = "real-estate-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Production-oriented real estate recommendation API with deterministic scoring and grounded AI explanations"
 readme = "README.md"
 authors = [
     { name = "Oshadha", email = "oshadha@gmail.com" }
